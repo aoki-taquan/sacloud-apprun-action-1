@@ -6,8 +6,9 @@ WORKDIR /app
 # Install system dependencies for building Python packages
 RUN apk add --no-cache gcc musl-dev linux-headers sqlite-dev
 
-# Copy requirements first to leverage Docker layer caching
-COPY requirements.txt ./
+# Copy requirements file (can be customized via build arg)
+ARG REQUIREMENTS_FILE=requirements.txt
+COPY ${REQUIREMENTS_FILE} ./requirements.txt
 RUN pip install --no-cache-dir --user -r requirements.txt
 
 # Copy application code

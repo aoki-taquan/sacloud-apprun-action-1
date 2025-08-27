@@ -60,6 +60,18 @@ jobs:
     # ... other parameters
 ```
 
+### Custom Requirements File
+
+```yaml
+- name: Deploy Python App with Custom Requirements
+  uses: your-username/sacloud-apprun-action@v1
+  with:
+    language: python
+    requirements-file: config/requirements.txt  # Custom path
+    sakura-api-key: ${{ secrets.SAKURA_API_KEY }}
+    # ... other parameters
+```
+
 ### With Litestream Backup
 
 ```yaml
@@ -94,6 +106,7 @@ jobs:
 | `max-memory` | Maximum memory allocation | No | `256Mi` |
 | `timeout-seconds` | Request timeout | No | `300` |
 | `use-repository-dockerfile` | Use existing Dockerfile | No | `true` |
+| `requirements-file` | Path to requirements.txt file (relative to app-dir) | No | `requirements.txt` |
 
 ### Litestream Parameters
 
@@ -111,9 +124,14 @@ jobs:
 
 Your Python application should:
 
-1. Have a `requirements.txt` file with dependencies
+1. Have a requirements file with dependencies (default: `requirements.txt`)
 2. Have a main entry point (default: `app.py`)
 3. Listen on the port specified by the `PORT` environment variable
+
+You can specify a custom requirements file path using the `requirements-file` parameter:
+```yaml
+requirements-file: config/requirements.txt
+```
 
 Example `app.py`:
 ```python

@@ -70,6 +70,10 @@ inputs:
     description: 'Use repository Dockerfile instead of optimized one'
     required: false
     default: 'true'
+  requirements-file:
+    description: 'Path to requirements.txt file (relative to app-dir, default: requirements.txt)'
+    required: false
+    default: 'requirements.txt'
 
 outputs:
   public-url:
@@ -95,10 +99,12 @@ runs:
         
         # Auto-detect language if not specified
         LANGUAGE="${{ inputs.language }}"
+        REQUIREMENTS_FILE="${{ inputs.requirements-file }}"
+        
         if [ "$LANGUAGE" = "auto" ]; then
           if [ -f "go.mod" ] || [ -f "main.go" ]; then
             LANGUAGE="go"
-          elif [ -f "requirements.txt" ] || [ -f "app.py" ] || [ -f "main.py" ]; then
+          elif [ -f "$REQUIREMENTS_FILE" ] || [ -f "app.py" ] || [ -f "main.py" ]; then
             LANGUAGE="python"
           else
             echo "❌ Could not auto-detect language. Please specify 'go' or 'python' in the language input."
@@ -107,6 +113,7 @@ runs:
         fi
         
         echo "language=${LANGUAGE}" >> $GITHUB_OUTPUT
+        echo "requirements_file=${REQUIREMENTS_FILE}" >> $GITHUB_OUTPUT
         
         # Determine if Litestream is needed
         if [ -n "${{ inputs.object-storage-bucket }}" ] && \
@@ -164,6 +171,7 @@ runs:
           ${{ inputs.container-registry }}/${{ steps.app-name.outputs.name }}:${{ github.sha }}
         build-args: |
           PORT=${{ inputs.port }}
+          REQUIREMENTS_FILE=${{ steps.dockerfile.outputs.requirements_file }}
         provenance: false
 
     - name: Deploy to AppRun
