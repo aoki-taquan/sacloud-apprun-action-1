@@ -1,0 +1,88 @@
+# Build stage
+FROM python:3.12-alpine AS builder
+
+WORKDIR /app
+
+# Install system dependencies for building Python packages
+RUN apk add --no-cache gcc musl-dev linux-headers sqlite-dev
+
+# Copy requirements first to leverage Docker layer caching
+COPY requirements.txt ./
+RUN pip install --no-cache-dir --user -r requirements.txt
+
+# Copy application code
+COPY . .
+
+# Run stage
+FROM python:3.12-alpine
+
+# Install Litestream and runtime dependencies
+RUN apk add --no-cache bash curl ca-certificates sqlite-libs \
+    && curl -L https://github.com/benbjohnson/litestream/releases/download/v0.3.13/litestream-v0.3.13-linux-amd64.tar.gz | tar -C /usr/local/bin -xzf -
+
+WORKDIR /app
+
+# Copy installed packages from builder stage
+COPY --from=builder /root/.local /root/.local
+
+# Copy application code
+COPY . .
+
+# Add local bin to PATH
+ENV PATH=/root/.local/bin:$PATH
+
+# Litestream setup script
+COPY <<'EOF' /app/setup-litestream.sh
+#!/bin/bash
+set -e
+
+if [ -n "$SAKURA_OBJECT_STORAGE_BUCKET" ] && \
+   [ -n "$SAKURA_OBJECT_STORAGE_ACCESS_KEY" ] && \
+   [ -n "$SAKURA_OBJECT_STORAGE_SECRET_KEY" ] && \
+   [ -n "$SQLITE_DB_PATH" ]; then
+
+  echo "Configuring Litestream backup..."
+
+  mkdir -p "$(dirname "$SQLITE_DB_PATH")"
+
+  cat > /etc/litestream.yml <<LITESTREAM_EOF
+dbs:
+  - path: $SQLITE_DB_PATH
+    replicas:
+      - type: s3
+        endpoint: https://s3.isk01.sakurastorage.jp
+        bucket: $SAKURA_OBJECT_STORAGE_BUCKET
+        path: ${APP_NAME}/${SQLITE_DB_PATH##*/}
+        access-key-id: $SAKURA_OBJECT_STORAGE_ACCESS_KEY
+        secret-access-key: $SAKURA_OBJECT_STORAGE_SECRET_KEY
+        sync-interval: ${LITESTREAM_REPLICATE_INTERVAL:-10s}
+LITESTREAM_EOF
+
+  if [ ! -f "$SQLITE_DB_PATH" ]; then
+    echo "Database not found, attempting to restore from backup..."
+    if /usr/local/bin/litestream restore -config /etc/litestream.yml -if-replica-exists "$SQLITE_DB_PATH"; then
+      echo "Database restored successfully from backup"
+    else
+      echo "No backup found or restore failed, starting with fresh database"
+    fi
+  fi
+
+  echo "Starting Litestream with app integration..."
+  sync
+
+  cd /app
+  exec /usr/local/bin/litestream replicate -config /etc/litestream.yml -exec "python app.py"
+else
+  echo "Litestream backup not configured, starting app directly..."
+  sync
+  exec python app.py
+fi
+EOF
+
+RUN chmod +x /app/setup-litestream.sh
+
+ARG PORT=8080
+ENV PORT=$PORT
+EXPOSE $PORT
+
+ENTRYPOINT ["/app/setup-litestream.sh"]

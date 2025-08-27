@@ -1,8 +1,12 @@
-name: 'Deploy Go to Sakura AppRun'
-description: 'Build and deploy Go applications to Sakura AppRun'
+name: 'Deploy to Sakura AppRun'
+description: 'Build and deploy Go or Python applications to Sakura AppRun'
 author: 'WEI TONG LIN'
 
 inputs:
+  language:
+    description: 'Application language (go or python)'
+    required: false
+    default: 'auto'
   sakura-api-key:
     description: 'Sakura Cloud API Key'
     required: true
@@ -88,17 +92,34 @@ runs:
         if [ -n "${{ inputs.app-dir }}" ]; then
           cd "${{ inputs.app-dir }}"
         fi
+        
+        # Auto-detect language if not specified
+        LANGUAGE="${{ inputs.language }}"
+        if [ "$LANGUAGE" = "auto" ]; then
+          if [ -f "go.mod" ] || [ -f "main.go" ]; then
+            LANGUAGE="go"
+          elif [ -f "requirements.txt" ] || [ -f "app.py" ] || [ -f "main.py" ]; then
+            LANGUAGE="python"
+          else
+            echo "❌ Could not auto-detect language. Please specify 'go' or 'python' in the language input."
+            exit 1
+          fi
+        fi
+        
+        echo "language=${LANGUAGE}" >> $GITHUB_OUTPUT
+        
+        # Determine if Litestream is needed
         if [ -n "${{ inputs.object-storage-bucket }}" ] && \
            [ -n "${{ inputs.object-storage-access-key }}" ] && \
            [ -n "${{ inputs.object-storage-secret-key }}" ] && \
            [ -n "${{ inputs.sqlite-db-path }}" ]; then
           echo "Litestream backup enabled"
           echo "use_litestream=true" >> $GITHUB_OUTPUT
-          DOCKERFILE_URL="https://raw.githubusercontent.com/ippanpeople/sacloud-apprun-action/${ACTION_REF}/Dockerfile.go-litestream"
+          DOCKERFILE_URL="https://raw.githubusercontent.com/ippanpeople/sacloud-apprun-action/${ACTION_REF}/Dockerfile.${LANGUAGE}-litestream"
         else
           echo "Standard deployment (no Litestream)"
           echo "use_litestream=false" >> $GITHUB_OUTPUT
-          DOCKERFILE_URL="https://raw.githubusercontent.com/ippanpeople/sacloud-apprun-action/${ACTION_REF}/Dockerfile.go"
+          DOCKERFILE_URL="https://raw.githubusercontent.com/ippanpeople/sacloud-apprun-action/${ACTION_REF}/Dockerfile.${LANGUAGE}"
         fi
 
         if [ "${{ inputs.use-repository-dockerfile }}" = "true" ] && [ -f Dockerfile ]; then
