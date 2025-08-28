@@ -1,7 +1,7 @@
 FROM python:3.12-alpine
 
 # Install Litestream and system dependencies
-RUN apk add --no-cache gcc musl-dev linux-headers sqlite-libs curl \
+RUN apk add --no-cache gcc musl-dev linux-headers sqlite-libs curl sql sqlite3 \
     && curl -L https://github.com/benbjohnson/litestream/releases/download/v0.3.13/litestream-v0.3.13-linux-amd64.tar.gz | tar -C /usr/local/bin -xzf -
 
 WORKDIR /app
