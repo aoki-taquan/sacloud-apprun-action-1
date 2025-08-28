@@ -54,8 +54,8 @@ inputs:
     description: 'Sakura Object Storage secret key'
     required: false
     default: ''
-  sqlite-db-path:
-    description: 'Path to SQLite database file (required when using Litestream backup)'
+  sqlite-db-folder:
+    description: 'Path to folder containing SQLite3 database files (required when using Litestream backup with wildcard pattern)'
     required: false
     default: ''
   litestream-replicate-interval:
@@ -106,7 +106,7 @@ runs:
         if [ -n "${{ inputs.object-storage-bucket }}" ] && \
            [ -n "${{ inputs.object-storage-access-key }}" ] && \
            [ -n "${{ inputs.object-storage-secret-key }}" ] && \
-           [ -n "${{ inputs.sqlite-db-path }}" ]; then
+           [ -n "${{ inputs.sqlite-db-folder }}" ]; then
           echo "Litestream backup enabled"
           echo "use_litestream=true" >> $GITHUB_OUTPUT
           DOCKERFILE_URL="https://raw.githubusercontent.com/aoki-taquan/sacloud-apprun-action-1/${ACTION_REF}/Dockerfile.python-litestream"
@@ -178,8 +178,8 @@ runs:
         if [ -n "${{ inputs.object-storage-secret-key }}" ]; then
           ENV_VARS=$(echo "$ENV_VARS" | jq '. + [{"key": "SAKURA_OBJECT_STORAGE_SECRET_KEY", "value": "${{ inputs.object-storage-secret-key }}"}]')
         fi
-        if [ -n "${{ inputs.sqlite-db-path }}" ]; then
-          ENV_VARS=$(echo "$ENV_VARS" | jq '. + [{"key": "SQLITE_DB_PATH", "value": "${{ inputs.sqlite-db-path }}"}]')
+        if [ -n "${{ inputs.sqlite-db-folder }}" ]; then
+          ENV_VARS=$(echo "$ENV_VARS" | jq '. + [{"key": "SQLITE_DB_FOLDER", "value": "${{ inputs.sqlite-db-folder }}"}]')
         fi
         if [ -n "${{ inputs.litestream-replicate-interval }}" ]; then
           ENV_VARS=$(echo "$ENV_VARS" | jq '. + [{"key": "LITESTREAM_REPLICATE_INTERVAL", "value": "${{ inputs.litestream-replicate-interval }}"}]')

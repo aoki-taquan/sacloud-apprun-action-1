@@ -1,7 +1,7 @@
 FROM python:3.12-alpine
 
 # Install Litestream and system dependencies
-RUN apk add --no-cache gcc musl-dev linux-headers sqlite-libs curl\
+RUN apk add --no-cache gcc musl-dev linux-headers sqlite-libs curl \
     && curl -L https://github.com/benbjohnson/litestream/releases/download/v0.3.13/litestream-v0.3.13-linux-amd64.tar.gz | tar -C /usr/local/bin -xzf -
 
 WORKDIR /app
@@ -23,28 +23,26 @@ set -e
 if [ -n "$SAKURA_OBJECT_STORAGE_BUCKET" ] && \
    [ -n "$SAKURA_OBJECT_STORAGE_ACCESS_KEY" ] && \
    [ -n "$SAKURA_OBJECT_STORAGE_SECRET_KEY" ] && \
-   [ -n "$SQLITE_DB_PATH" ]; then
+   [ -n "$SQLITE_DB_FOLDER" ]; then
 
-  echo "Configuring Litestream backup..."
-  mkdir -p "$(dirname "$SQLITE_DB_PATH")"
-
+  echo "Configuring Litestream backup for folder: $SQLITE_DB_FOLDER"
+  mkdir -p "$SQLITE_DB_FOLDER"
+  
   cat > /etc/litestream.yml <<LITESTREAM_EOF
 dbs:
-  - path: $SQLITE_DB_PATH
+  - path: ${SQLITE_DB_FOLDER}/*.sqlite3
     replicas:
       - type: s3
         endpoint: https://s3.isk01.sakurastorage.jp
         bucket: $SAKURA_OBJECT_STORAGE_BUCKET
-        path: ${APP_NAME}/${SQLITE_DB_PATH##*/}
+        path: ${APP_NAME}/{{ .Name }}
         access-key-id: $SAKURA_OBJECT_STORAGE_ACCESS_KEY
         secret-access-key: $SAKURA_OBJECT_STORAGE_SECRET_KEY
         sync-interval: ${LITESTREAM_REPLICATE_INTERVAL:-10s}
 LITESTREAM_EOF
 
-  if [ ! -f "$SQLITE_DB_PATH" ]; then
-    echo "Attempting to restore from backup..."
-    /usr/local/bin/litestream restore -config /etc/litestream.yml -if-replica-exists "$SQLITE_DB_PATH" || echo "No backup found"
-  fi
+  echo "Attempting to restore databases from backup..."
+  /usr/local/bin/litestream restore -config /etc/litestream.yml -if-replica-exists || echo "No backups found"
 
   echo "Starting with Litestream backup..."
   exec /usr/local/bin/litestream replicate -config /etc/litestream.yml -exec "python MAIN_FILE_PLACEHOLDER"
