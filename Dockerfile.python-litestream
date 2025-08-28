@@ -28,21 +28,83 @@ if [ -n "$SAKURA_OBJECT_STORAGE_BUCKET" ] && \
   echo "Configuring Litestream backup for folder: $SQLITE_DB_FOLDER"
   mkdir -p "$SQLITE_DB_FOLDER"
   
+  # Create a dummy SQLite database file to track the entire folder
+  ARCHIVE_DB="$SQLITE_DB_FOLDER/.litestream_archive.db"
+  
   cat > /etc/litestream.yml <<LITESTREAM_EOF
 dbs:
-  - path: ${SQLITE_DB_FOLDER}/*.sqlite3
+  - path: $ARCHIVE_DB
     replicas:
       - type: s3
         endpoint: https://s3.isk01.sakurastorage.jp
         bucket: $SAKURA_OBJECT_STORAGE_BUCKET
-        path: ${APP_NAME}/{{ .Name }}
+        path: ${APP_NAME}/sqlite_archive.db
         access-key-id: $SAKURA_OBJECT_STORAGE_ACCESS_KEY
         secret-access-key: $SAKURA_OBJECT_STORAGE_SECRET_KEY
         sync-interval: ${LITESTREAM_REPLICATE_INTERVAL:-10s}
 LITESTREAM_EOF
 
-  echo "Attempting to restore databases from backup..."
-  /usr/local/bin/litestream restore -config /etc/litestream.yml -if-replica-exists || echo "No backups found"
+  # Create backup and restore functions
+  create_backup() {
+    echo "Creating backup archive of $SQLITE_DB_FOLDER"
+    cd "$(dirname "$SQLITE_DB_FOLDER")"
+    tar -czf "/tmp/sqlite_backup.tar.gz" "$(basename "$SQLITE_DB_FOLDER")"
+    
+    # Store the archive as a blob in the dummy database
+    sqlite3 "$ARCHIVE_DB" "CREATE TABLE IF NOT EXISTS backup_archive (id INTEGER PRIMARY KEY, data BLOB, timestamp TEXT);"
+    sqlite3 "$ARCHIVE_DB" "DELETE FROM backup_archive;"
+    sqlite3 "$ARCHIVE_DB" "INSERT INTO backup_archive (data, timestamp) VALUES (readfile('/tmp/sqlite_backup.tar.gz'), datetime('now'));"
+    rm -f "/tmp/sqlite_backup.tar.gz"
+    echo "Backup archive created successfully"
+  }
+
+  restore_backup() {
+    echo "Attempting to restore databases from backup..."
+    if [ -f "$ARCHIVE_DB" ] && sqlite3 "$ARCHIVE_DB" "SELECT COUNT(*) FROM backup_archive;" >/dev/null 2>&1; then
+      echo "Found backup archive, restoring..."
+      sqlite3 "$ARCHIVE_DB" "SELECT writefile('/tmp/sqlite_restore.tar.gz', data) FROM backup_archive ORDER BY timestamp DESC LIMIT 1;"
+      if [ -f "/tmp/sqlite_restore.tar.gz" ]; then
+        cd "$(dirname "$SQLITE_DB_FOLDER")"
+        rm -rf "$(basename "$SQLITE_DB_FOLDER")"
+        tar -xzf "/tmp/sqlite_restore.tar.gz"
+        rm -f "/tmp/sqlite_restore.tar.gz"
+        echo "Database folder restored successfully"
+      else
+        echo "Failed to extract backup archive"
+      fi
+    else
+      echo "No backup archive found"
+    fi
+  }
+
+  # Create a background process to periodically create backups
+  backup_daemon() {
+    while true; do
+      sleep ${BACKUP_INTERVAL:-30}
+      if [ -d "$SQLITE_DB_FOLDER" ]; then
+        create_backup
+      fi
+    done
+  }
+
+  # Initialize dummy database if it doesn't exist
+  if [ ! -f "$ARCHIVE_DB" ]; then
+    sqlite3 "$ARCHIVE_DB" "CREATE TABLE IF NOT EXISTS backup_archive (id INTEGER PRIMARY KEY, data BLOB, timestamp TEXT);"
+  fi
+
+  # First, try to restore from Litestream backup
+  /usr/local/bin/litestream restore -config /etc/litestream.yml -if-replica-exists || echo "No Litestream backups found"
+  
+  # Then restore from the archive
+  restore_backup
+
+  # Create initial backup if folder has content
+  if [ -n "$(find "$SQLITE_DB_FOLDER" -name "*.sqlite*" -o -name "*.db" 2>/dev/null)" ]; then
+    create_backup
+  fi
+
+  # Start backup daemon in background
+  backup_daemon &
 
   echo "Starting with Litestream backup..."
   exec /usr/local/bin/litestream replicate -config /etc/litestream.yml -exec "python MAIN_FILE_PLACEHOLDER"
