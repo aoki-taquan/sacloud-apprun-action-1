@@ -55,7 +55,7 @@ inputs:
     required: false
     default: ''
   sqlite-db-folder:
-    description: 'Path to folder containing SQLite3 database files (required when using Litestream backup with wildcard pattern)'
+    description: 'Path to SQLite database folder (required when using Litestream backup, entire folder will be backed up as tar archive)'
     required: false
     default: ''
   litestream-replicate-interval:

@@ -1,8 +1,8 @@
 FROM python:3.12-alpine
 
 # Install Litestream and system dependencies
-RUN apk add --no-cache gcc musl-dev linux-headers sqlite-libs curl sqlite \
-    && curl -L https://github.com/benbjohnson/litestream/releases/download/v0.3.13/litestream-v0.3.13-linux-amd64.tar.gz | tar -C /usr/local/bin -xzf -
+RUN apk add --no-cache gcc musl-dev linux-headers sqlite-libs curl tar \
+  && curl -L https://github.com/benbjohnson/litestream/releases/download/v0.3.13/litestream-v0.3.13-linux-amd64.tar.gz | tar -C /usr/local/bin -xzf -
 
 WORKDIR /app
 
@@ -27,151 +27,88 @@ if [ -n "$SAKURA_OBJECT_STORAGE_BUCKET" ] && \
 
   echo "Configuring Litestream backup for folder: $SQLITE_DB_FOLDER"
   mkdir -p "$SQLITE_DB_FOLDER"
-  
-  # Create a dummy SQLite database file to track the entire folder
-  ARCHIVE_DB="$SQLITE_DB_FOLDER/.litestream_archive.db"
+
+  # Create a virtual SQLite database that will trigger Litestream
+  LITESTREAM_DB="/tmp/litestream-trigger.db"
   
   cat > /etc/litestream.yml <<LITESTREAM_EOF
 dbs:
-  - path: $ARCHIVE_DB
+  - path: $LITESTREAM_DB
     replicas:
       - type: s3
         endpoint: https://s3.isk01.sakurastorage.jp
         bucket: $SAKURA_OBJECT_STORAGE_BUCKET
-        path: ${APP_NAME}/sqlite_archive.db
+        path: ${APP_NAME}/db-folder.tar.gz
         access-key-id: $SAKURA_OBJECT_STORAGE_ACCESS_KEY
         secret-access-key: $SAKURA_OBJECT_STORAGE_SECRET_KEY
         sync-interval: ${LITESTREAM_REPLICATE_INTERVAL:-10s}
 LITESTREAM_EOF
 
-  # Create backup and restore functions
-  create_backup() {
-    echo "Creating backup archive of $SQLITE_DB_FOLDER"
-    
-    # Check if the folder exists and has content
-    if [ ! -d "$SQLITE_DB_FOLDER" ]; then
-      echo "SQLite folder does not exist, skipping backup"
-      return 1
-    fi
-    
-    # Check if there are any database files to backup
-    if [ -z "$(find "$SQLITE_DB_FOLDER" -name "*.sqlite*" -o -name "*.db" 2>/dev/null | head -1)" ]; then
-      echo "No database files found in $SQLITE_DB_FOLDER, skipping backup"
-      return 1
-    fi
-    
-    cd "$(dirname "$SQLITE_DB_FOLDER")" || return 1
-    
-    # Create tar archive with error checking
-    if tar -czf "/tmp/sqlite_backup.tar.gz" "$(basename "$SQLITE_DB_FOLDER")" 2>/dev/null; then
-      # Verify the archive was created and is not empty
-      if [ -f "/tmp/sqlite_backup.tar.gz" ] && [ -s "/tmp/sqlite_backup.tar.gz" ]; then
-        echo "Archive created successfully, size: $(stat -c%s /tmp/sqlite_backup.tar.gz 2>/dev/null || stat -f%z /tmp/sqlite_backup.tar.gz) bytes"
-        
-        # Store the archive as a blob in the dummy database
-        sqlite3 "$ARCHIVE_DB" "CREATE TABLE IF NOT EXISTS backup_archive (id INTEGER PRIMARY KEY, data BLOB, timestamp TEXT);" || return 1
-        sqlite3 "$ARCHIVE_DB" "DELETE FROM backup_archive;" || return 1
-        
-        if sqlite3 "$ARCHIVE_DB" "INSERT INTO backup_archive (data, timestamp) VALUES (readfile('/tmp/sqlite_backup.tar.gz'), datetime('now'));" 2>/dev/null; then
-          rm -f "/tmp/sqlite_backup.tar.gz"
-          echo "Backup archive created successfully"
-          return 0
-        else
-          echo "Failed to store backup in database"
-          rm -f "/tmp/sqlite_backup.tar.gz"
-          return 1
-        fi
-      else
-        echo "Failed to create archive or archive is empty"
-        rm -f "/tmp/sqlite_backup.tar.gz"
-        return 1
-      fi
-    else
-      echo "Failed to create tar archive"
-      return 1
-    fi
-  }
+  # Create backup script that will be called by Litestream hooks
+  cat > /app/backup-folder.sh <<BACKUP_EOF
+#!/bin/sh
+# This script is called by Litestream to backup the folder
+cd "$SQLITE_DB_FOLDER"
+tar -czf /tmp/db-folder-backup.tar.gz ./*
+# Update the trigger database to signal Litestream
+sqlite3 "$LITESTREAM_DB" "CREATE TABLE IF NOT EXISTS backup_log (timestamp TEXT); INSERT INTO backup_log VALUES (datetime('now'));"
+BACKUP_EOF
 
-  restore_backup() {
-    echo "Attempting to restore databases from backup..."
-    if [ -f "$ARCHIVE_DB" ] && sqlite3 "$ARCHIVE_DB" "SELECT COUNT(*) FROM backup_archive;" >/dev/null 2>&1; then
-      RECORD_COUNT=$(sqlite3 "$ARCHIVE_DB" "SELECT COUNT(*) FROM backup_archive;")
-      if [ "$RECORD_COUNT" -gt 0 ]; then
-        echo "Found backup archive with $RECORD_COUNT records, restoring..."
-        
-        # Extract backup data to temporary file
-        if sqlite3 "$ARCHIVE_DB" "SELECT writefile('/tmp/sqlite_restore.tar.gz', data) FROM backup_archive ORDER BY timestamp DESC LIMIT 1;" 2>/dev/null; then
-          if [ -f "/tmp/sqlite_restore.tar.gz" ] && [ -s "/tmp/sqlite_restore.tar.gz" ]; then
-            echo "Backup file extracted successfully, size: $(stat -c%s /tmp/sqlite_restore.tar.gz 2>/dev/null || stat -f%z /tmp/sqlite_restore.tar.gz) bytes"
-            
-            # Verify tar file integrity before extraction
-            if tar -tzf "/tmp/sqlite_restore.tar.gz" >/dev/null 2>&1; then
-              cd "$(dirname "$SQLITE_DB_FOLDER")"
-              rm -rf "$(basename "$SQLITE_DB_FOLDER")"
-              
-              if tar -xzf "/tmp/sqlite_restore.tar.gz"; then
-                rm -f "/tmp/sqlite_restore.tar.gz"
-                echo "Database folder restored successfully"
-              else
-                echo "Failed to extract tar archive"
-                rm -f "/tmp/sqlite_restore.tar.gz"
-              fi
-            else
-              echo "Backup archive is corrupted"
-              rm -f "/tmp/sqlite_restore.tar.gz"
-            fi
-          else
-            echo "Failed to extract backup data or file is empty"
-            rm -f "/tmp/sqlite_restore.tar.gz"
-          fi
-        else
-          echo "Failed to write backup data to temporary file"
-        fi
-      else
-        echo "No backup records found in archive database"
-      fi
-    else
-      echo "No backup archive found or archive database is inaccessible"
-    fi
-  }
+  chmod +x /app/backup-folder.sh
 
-  # Create a background process to periodically create backups
-  backup_daemon() {
-    while true; do
-      sleep ${BACKUP_INTERVAL:-30}
-      if [ -d "$SQLITE_DB_FOLDER" ]; then
-        echo "Running periodic backup..."
-        create_backup || echo "Periodic backup failed"
-      else
-        echo "SQLite folder not found, skipping periodic backup"
-      fi
-    done
-  }
+  # Create restore script
+  cat > /app/restore-folder.sh <<RESTORE_EOF
+#!/bin/sh
+# This script restores the folder from backup
+if [ -f "/tmp/db-folder-backup.tar.gz" ]; then
+  echo "Restoring folder from backup..."
+  mkdir -p "$SQLITE_DB_FOLDER"
+  cd "$SQLITE_DB_FOLDER"
+  tar -xzf /tmp/db-folder-backup.tar.gz
+  echo "Folder restored successfully"
+else
+  echo "No backup file found"
+fi
+RESTORE_EOF
 
-  # Initialize dummy database if it doesn't exist
-  if [ ! -f "$ARCHIVE_DB" ]; then
-    sqlite3 "$ARCHIVE_DB" "CREATE TABLE IF NOT EXISTS backup_archive (id INTEGER PRIMARY KEY, data BLOB, timestamp TEXT);"
+  chmod +x /app/restore-folder.sh
+
+  # Initialize the trigger database
+  sqlite3 "$LITESTREAM_DB" "CREATE TABLE IF NOT EXISTS backup_log (timestamp TEXT);"
+
+  # Try to restore from backup
+  if [ ! "$(ls -A $SQLITE_DB_FOLDER 2>/dev/null)" ]; then
+    echo "Attempting to restore folder from backup..."
+    /usr/local/bin/litestream restore -config /etc/litestream.yml -if-replica-exists "$LITESTREAM_DB" || echo "No backup found"
+    /app/restore-folder.sh
   fi
 
-  # First, try to restore from Litestream backup
-  /usr/local/bin/litestream restore -config /etc/litestream.yml -if-replica-exists || echo "No Litestream backups found"
-  
-  # Then restore from the archive
-  restore_backup
+  # Start the application with a background folder backup process
+  cat > /app/start-with-backup.sh <<START_EOF
+#!/bin/sh
+# Start Litestream in background
+/usr/local/bin/litestream replicate -config /etc/litestream.yml &
+LITESTREAM_PID=\$!
 
-  # Create initial backup if folder has content
-  if [ -d "$SQLITE_DB_FOLDER" ] && [ -n "$(find "$SQLITE_DB_FOLDER" -name "*.sqlite*" -o -name "*.db" 2>/dev/null | head -1)" ]; then
-    echo "Found existing database files, creating initial backup..."
-    create_backup || echo "Initial backup creation failed, but continuing..."
-  else
-    echo "No existing database files found, skipping initial backup"
-  fi
+# Start periodic folder backup
+while true; do
+  sleep \${LITESTREAM_REPLICATE_INTERVAL:-10s}
+  /app/backup-folder.sh
+done &
+BACKUP_PID=\$!
 
-  # Start backup daemon in background
-  backup_daemon &
+# Start the main application
+python MAIN_FILE_PLACEHOLDER &
+APP_PID=\$!
 
-  echo "Starting with Litestream backup..."
-  exec /usr/local/bin/litestream replicate -config /etc/litestream.yml -exec "python MAIN_FILE_PLACEHOLDER"
+# Wait for any process to exit
+wait \$APP_PID
+kill \$LITESTREAM_PID \$BACKUP_PID 2>/dev/null || true
+START_EOF
+
+  chmod +x /app/start-with-backup.sh
+  echo "Starting with Litestream folder backup..."
+  exec /app/start-with-backup.sh
 else
   echo "Starting without backup..."
   exec python MAIN_FILE_PLACEHOLDER

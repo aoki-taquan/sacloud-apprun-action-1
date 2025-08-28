@@ -73,7 +73,7 @@ jobs:
     object-storage-bucket: my-backup-bucket
     object-storage-access-key: ${{ secrets.S3_ACCESS_KEY }}
     object-storage-secret-key: ${{ secrets.S3_SECRET_KEY }}
-    sqlite-db-path: /app/data/database.db
+    sqlite-db-folder: /app/data
 ```
 
 ## Input Parameters
@@ -102,7 +102,7 @@ jobs:
 | `object-storage-bucket` | S3 bucket for SQLite backup | No | |
 | `object-storage-access-key` | S3 access key | No | |
 | `object-storage-secret-key` | S3 secret key | No | |
-| `sqlite-db-path` | SQLite database file path | No | |
+| `sqlite-db-folder` | SQLite database folder path (entire folder will be backed up as tar archive) | No | |
 | `litestream-replicate-interval` | Backup interval | No | `10s` |
 
 ## Application Requirements

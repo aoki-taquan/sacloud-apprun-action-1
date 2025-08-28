@@ -3,6 +3,8 @@
 ## [Unreleased]
 
 ### Changed
+- **BREAKING**: Changed `sqlite-db-path` to `sqlite-db-folder` for Litestream backup
+- Litestream now backs up entire folder contents as tar.gz archive instead of single database file
 - Simplified to Python-only support (removed Go support)
 - Simplified Dockerfiles (removed multi-stage builds)
 - Removed automatic language detection
@@ -10,6 +12,7 @@
 
 ### Added
 - Custom requirements file path support
+- Folder-based SQLite backup with tar compression
 - Streamlined deployment process
 
 ### Removed
