@@ -1,39 +1,26 @@
-# Build stage
-FROM python:3.12-alpine AS builder
-
-WORKDIR /app
-
-# Install system dependencies for building Python packages
-RUN apk add --no-cache gcc musl-dev linux-headers
-
-# Copy requirements file (can be customized via build arg)
-ARG REQUIREMENTS_FILE=requirements.txt
-COPY ${REQUIREMENTS_FILE} ./requirements.txt
-RUN pip install --no-cache-dir --user -r requirements.txt
-
-# Copy application code
-COPY . .
-
-# Run stage
 FROM python:3.12-alpine
 
 WORKDIR /app
 
-# Install runtime dependencies
-RUN apk add --no-cache bash curl ca-certificates
+# Install system dependencies
+RUN apk add --no-cache gcc musl-dev linux-headers
 
-# Copy installed packages from builder stage
-COPY --from=builder /root/.local /root/.local
+# Copy requirements file
+ARG REQUIREMENTS_FILE=requirements.txt
+COPY ${REQUIREMENTS_FILE} ./requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY . .
 
-# Add local bin to PATH
-ENV PATH=/root/.local/bin:$PATH
+# Create entrypoint script
+ARG MAIN_FILE=app.py
+RUN echo "#!/bin/sh" > /entrypoint.sh && \
+    echo "exec python ${MAIN_FILE}" >> /entrypoint.sh && \
+    chmod +x /entrypoint.sh
 
 ARG PORT=8080
 ENV PORT=$PORT
 EXPOSE $PORT
 
-# Default command (can be overridden)
-CMD ["python", "app.py"]
+ENTRYPOINT ["/entrypoint.sh"]

@@ -1,40 +1,23 @@
-# Build stage
-FROM python:3.12-alpine AS builder
-
-WORKDIR /app
-
-# Install system dependencies for building Python packages
-RUN apk add --no-cache gcc musl-dev linux-headers sqlite-dev
-
-# Copy requirements file (can be customized via build arg)
-ARG REQUIREMENTS_FILE=requirements.txt
-COPY ${REQUIREMENTS_FILE} ./requirements.txt
-RUN pip install --no-cache-dir --user -r requirements.txt
-
-# Copy application code
-COPY . .
-
-# Run stage
 FROM python:3.12-alpine
 
-# Install Litestream and runtime dependencies
-RUN apk add --no-cache bash curl ca-certificates sqlite-libs \
+# Install Litestream and system dependencies
+RUN apk add --no-cache gcc musl-dev linux-headers sqlite-libs \
     && curl -L https://github.com/benbjohnson/litestream/releases/download/v0.3.13/litestream-v0.3.13-linux-amd64.tar.gz | tar -C /usr/local/bin -xzf -
 
 WORKDIR /app
 
-# Copy installed packages from builder stage
-COPY --from=builder /root/.local /root/.local
+# Copy requirements file
+ARG REQUIREMENTS_FILE=requirements.txt
+COPY ${REQUIREMENTS_FILE} ./requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY . .
 
-# Add local bin to PATH
-ENV PATH=/root/.local/bin:$PATH
-
 # Litestream setup script
+ARG MAIN_FILE=app.py
 COPY <<'EOF' /app/setup-litestream.sh
-#!/bin/bash
+#!/bin/sh
 set -e
 
 if [ -n "$SAKURA_OBJECT_STORAGE_BUCKET" ] && \
@@ -43,7 +26,6 @@ if [ -n "$SAKURA_OBJECT_STORAGE_BUCKET" ] && \
    [ -n "$SQLITE_DB_PATH" ]; then
 
   echo "Configuring Litestream backup..."
-
   mkdir -p "$(dirname "$SQLITE_DB_PATH")"
 
   cat > /etc/litestream.yml <<LITESTREAM_EOF
@@ -60,25 +42,20 @@ dbs:
 LITESTREAM_EOF
 
   if [ ! -f "$SQLITE_DB_PATH" ]; then
-    echo "Database not found, attempting to restore from backup..."
-    if /usr/local/bin/litestream restore -config /etc/litestream.yml -if-replica-exists "$SQLITE_DB_PATH"; then
-      echo "Database restored successfully from backup"
-    else
-      echo "No backup found or restore failed, starting with fresh database"
-    fi
+    echo "Attempting to restore from backup..."
+    /usr/local/bin/litestream restore -config /etc/litestream.yml -if-replica-exists "$SQLITE_DB_PATH" || echo "No backup found"
   fi
 
-  echo "Starting Litestream with app integration..."
-  sync
-
-  cd /app
-  exec /usr/local/bin/litestream replicate -config /etc/litestream.yml -exec "python app.py"
+  echo "Starting with Litestream backup..."
+  exec /usr/local/bin/litestream replicate -config /etc/litestream.yml -exec "python MAIN_FILE_PLACEHOLDER"
 else
-  echo "Litestream backup not configured, starting app directly..."
-  sync
-  exec python app.py
+  echo "Starting without backup..."
+  exec python MAIN_FILE_PLACEHOLDER
 fi
 EOF
+
+# Replace placeholder with actual main file
+RUN sed -i "s/MAIN_FILE_PLACEHOLDER/${MAIN_FILE}/g" /app/setup-litestream.sh
 
 RUN chmod +x /app/setup-litestream.sh
 

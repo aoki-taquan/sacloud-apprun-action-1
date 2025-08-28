@@ -1,12 +1,8 @@
-name: 'Deploy to Sakura AppRun'
-description: 'Build and deploy Go or Python applications to Sakura AppRun'
+name: 'Deploy Python to Sakura AppRun'
+description: 'Build and deploy Python applications to Sakura AppRun'
 author: 'WEI TONG LIN'
 
 inputs:
-  language:
-    description: 'Application language (go or python)'
-    required: false
-    default: 'auto'
   sakura-api-key:
     description: 'Sakura Cloud API Key'
     required: true
@@ -27,7 +23,7 @@ inputs:
     required: false
     default: ''
   app-dir:
-    description: 'Directory containing Go application (default: root directory)'
+    description: 'Directory containing Python application (default: root directory)'
     required: false
     default: ''
   port:
@@ -74,6 +70,10 @@ inputs:
     description: 'Path to requirements.txt file (relative to app-dir, default: requirements.txt)'
     required: false
     default: 'requirements.txt'
+  main-file:
+    description: 'Main Python file to run (default: app.py)'
+    required: false
+    default: 'app.py'
 
 outputs:
   public-url:
@@ -97,23 +97,10 @@ runs:
           cd "${{ inputs.app-dir }}"
         fi
         
-        # Auto-detect language if not specified
-        LANGUAGE="${{ inputs.language }}"
         REQUIREMENTS_FILE="${{ inputs.requirements-file }}"
-        
-        if [ "$LANGUAGE" = "auto" ]; then
-          if [ -f "go.mod" ] || [ -f "main.go" ]; then
-            LANGUAGE="go"
-          elif [ -f "$REQUIREMENTS_FILE" ] || [ -f "app.py" ] || [ -f "main.py" ]; then
-            LANGUAGE="python"
-          else
-            echo "❌ Could not auto-detect language. Please specify 'go' or 'python' in the language input."
-            exit 1
-          fi
-        fi
-        
-        echo "language=${LANGUAGE}" >> $GITHUB_OUTPUT
+        MAIN_FILE="${{ inputs.main-file }}"
         echo "requirements_file=${REQUIREMENTS_FILE}" >> $GITHUB_OUTPUT
+        echo "main_file=${MAIN_FILE}" >> $GITHUB_OUTPUT
         
         # Determine if Litestream is needed
         if [ -n "${{ inputs.object-storage-bucket }}" ] && \
@@ -122,11 +109,11 @@ runs:
            [ -n "${{ inputs.sqlite-db-path }}" ]; then
           echo "Litestream backup enabled"
           echo "use_litestream=true" >> $GITHUB_OUTPUT
-          DOCKERFILE_URL="https://raw.githubusercontent.com/ippanpeople/sacloud-apprun-action/${ACTION_REF}/Dockerfile.${LANGUAGE}-litestream"
+          DOCKERFILE_URL="https://raw.githubusercontent.com/ippanpeople/sacloud-apprun-action/${ACTION_REF}/Dockerfile.python-litestream"
         else
           echo "Standard deployment (no Litestream)"
           echo "use_litestream=false" >> $GITHUB_OUTPUT
-          DOCKERFILE_URL="https://raw.githubusercontent.com/ippanpeople/sacloud-apprun-action/${ACTION_REF}/Dockerfile.${LANGUAGE}"
+          DOCKERFILE_URL="https://raw.githubusercontent.com/ippanpeople/sacloud-apprun-action/${ACTION_REF}/Dockerfile.python"
         fi
 
         if [ "${{ inputs.use-repository-dockerfile }}" = "true" ] && [ -f Dockerfile ]; then
@@ -172,6 +159,7 @@ runs:
         build-args: |
           PORT=${{ inputs.port }}
           REQUIREMENTS_FILE=${{ steps.dockerfile.outputs.requirements_file }}
+          MAIN_FILE=${{ steps.dockerfile.outputs.main_file }}
         provenance: false
 
     - name: Deploy to AppRun

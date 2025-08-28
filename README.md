@@ -1,27 +1,15 @@
 # sacloud-apprun-action
 
-GitHub Action to build and deploy Go or Python applications to Sakura AppRun.
+GitHub Action to build and deploy Python applications to Sakura AppRun.
 
 ## Features
 
-- ✅ Support for both Go and Python applications
-- ✅ Automatic language detection
+- ✅ Python application support
 - ✅ Optimized Docker builds
 - ✅ Container registry integration
-- ✅ Litestream SQLite backup support (for both Go and Python)
+- ✅ Litestream SQLite backup support
 - ✅ Zero-downtime deployments
-
-## Supported Languages
-
-### Go
-- Automatically detected if `go.mod` or `main.go` exists
-- Uses multi-stage Docker builds for optimized images
-- CGO support included for SQLite
-
-### Python
-- Automatically detected if `requirements.txt`, `app.py`, or `main.py` exists
-- Uses multi-stage Docker builds with Alpine Linux
-- Default entry point: `python app.py`
+- ✅ Custom requirements file path
 
 ## Usage
 
@@ -49,25 +37,24 @@ jobs:
           container-registry-password: ${{ secrets.REGISTRY_PASSWORD }}
 ```
 
-### Language Specification
-
-```yaml
-- name: Deploy Python App
-  uses: your-username/sacloud-apprun-action@v1
-  with:
-    language: python  # or 'go', defaults to 'auto'
-    sakura-api-key: ${{ secrets.SAKURA_API_KEY }}
-    # ... other parameters
-```
-
 ### Custom Requirements File
 
 ```yaml
 - name: Deploy Python App with Custom Requirements
   uses: your-username/sacloud-apprun-action@v1
   with:
-    language: python
     requirements-file: config/requirements.txt  # Custom path
+    sakura-api-key: ${{ secrets.SAKURA_API_KEY }}
+    # ... other parameters
+```
+
+### Custom Main File
+
+```yaml
+- name: Deploy with Custom Main File
+  uses: your-username/sacloud-apprun-action@v1
+  with:
+    main-file: server.py  # Custom main file
     sakura-api-key: ${{ secrets.SAKURA_API_KEY }}
     # ... other parameters
 ```
@@ -93,7 +80,6 @@ jobs:
 
 | Parameter | Description | Required | Default |
 |-----------|-------------|----------|---------|
-| `language` | Application language (`go`, `python`, or `auto`) | No | `auto` |
 | `sakura-api-key` | Sakura Cloud API Key | Yes | |
 | `sakura-api-secret` | Sakura Cloud API Secret | Yes | |
 | `container-registry` | Container registry URL | Yes | |
@@ -107,6 +93,7 @@ jobs:
 | `timeout-seconds` | Request timeout | No | `300` |
 | `use-repository-dockerfile` | Use existing Dockerfile | No | `true` |
 | `requirements-file` | Path to requirements.txt file (relative to app-dir) | No | `requirements.txt` |
+| `main-file` | Main Python file to run | No | `app.py` |
 
 ### Litestream Parameters
 
@@ -120,18 +107,15 @@ jobs:
 
 ## Application Requirements
 
-### Python Applications
-
 Your Python application should:
 
 1. Have a requirements file with dependencies (default: `requirements.txt`)
 2. Have a main entry point (default: `app.py`)
 3. Listen on the port specified by the `PORT` environment variable
 
-You can specify a custom requirements file path using the `requirements-file` parameter:
-```yaml
-requirements-file: config/requirements.txt
-```
+You can customize file paths using these parameters:
+- `requirements-file`: Custom requirements file path (e.g., `config/requirements.txt`)
+- `main-file`: Custom main file (e.g., `server.py`, `main.py`)
 
 Example `app.py`:
 ```python
@@ -148,13 +132,6 @@ if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8080))
     app.run(host='0.0.0.0', port=port)
 ```
-
-### Go Applications
-
-Your Go application should:
-
-1. Have a `go.mod` file
-2. Listen on the port specified by the `PORT` environment variable
 
 ## Custom Dockerfile
 
