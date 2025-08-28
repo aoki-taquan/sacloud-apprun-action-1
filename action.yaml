@@ -109,11 +109,11 @@ runs:
            [ -n "${{ inputs.sqlite-db-path }}" ]; then
           echo "Litestream backup enabled"
           echo "use_litestream=true" >> $GITHUB_OUTPUT
-          DOCKERFILE_URL="https://raw.githubusercontent.com/ippanpeople/sacloud-apprun-action/${ACTION_REF}/Dockerfile.python-litestream"
+          DOCKERFILE_URL="https://raw.githubusercontent.com/aoki-taquan/sacloud-apprun-action-1/${ACTION_REF}/Dockerfile.python-litestream"
         else
           echo "Standard deployment (no Litestream)"
           echo "use_litestream=false" >> $GITHUB_OUTPUT
-          DOCKERFILE_URL="https://raw.githubusercontent.com/ippanpeople/sacloud-apprun-action/${ACTION_REF}/Dockerfile.python"
+          DOCKERFILE_URL="https://raw.githubusercontent.com/aoki-taquan/sacloud-apprun-action-1/${ACTION_REF}/Dockerfile.python"
         fi
 
         if [ "${{ inputs.use-repository-dockerfile }}" = "true" ] && [ -f Dockerfile ]; then
