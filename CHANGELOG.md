@@ -1,5 +1,7 @@
 # Changelog
 
+## [v0.2.5](https://github.com/aoki-taquan/sacloud-apprun-action-1/compare/v0.2.4...v0.2.5) - 2025-08-28
+
 ## [Unreleased]
 
 ### Changed
